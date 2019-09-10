@@ -1,5 +1,5 @@
 //
-//  JsonDatabase.swift
+//  JsonObjectStore.swift
 //  RapScript
 //
 //  Created by Roman Gille on 09.09.19.
@@ -8,14 +8,9 @@
 
 import Foundation
 
-class JsonDatabase {
+class JsonObjectStore {
 
-    var data: [String : [CodableDbElement]] = [:]
-
-    func key<T: CodableDbElement>(for elementType: T.Type) -> String {
-        return String(describing: elementType)
-    }
-
+    private var data: [String : [StorableObject]] = [:]
     private let fileManager = FileManager.default
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -23,9 +18,7 @@ class JsonDatabase {
     private var shouldPersist: [String: () -> ()] = [:]
     private var writeTimer: DispatchSourceTimer!
 
-    private lazy var jsonWriteQueue: DispatchQueue = {
-        return DispatchQueue(label: "json_write_queue")
-    }()
+    var debugLog: Bool = false
 
     private lazy var jsonDirectory: URL = {
         let appSupportDir = try! FileManager.default.url(
@@ -43,7 +36,7 @@ class JsonDatabase {
         return jsonDataDir
     }()
 
-    init<T: CodableDbElement>(with elementTypes: [T.Type]) {
+    init<T: StorableObject>(with elementTypes: [T.Type]) {
         // Prepare caches.
         for elementType in elementTypes {
             prepareCache(for: elementType)
@@ -65,6 +58,12 @@ class JsonDatabase {
         writeTimer.resume()
     }
 
+    func key<T: StorableObject>(for elementType: T.Type) -> String {
+        return String(describing: elementType)
+    }
+
+    // MARK: - Data persistence.
+
     private func persistIfNeeded() {
         guard !shouldPersist.isEmpty
             else { return }
@@ -77,17 +76,17 @@ class JsonDatabase {
         }
     }
 
-    func shouldPersist<T: CodableDbElement>(elementsOf elementType: T.Type) {
+    func shouldPersist<T: StorableObject>(elementsOf elementType: T.Type) {
         guard shouldPersist[key(for: elementType)] == nil
             else { return }
         shouldPersist[key(for: elementType)] = { [weak self] in self?.persistCache(for: elementType) }
     }
 
-    func fileUrl<T: CodableDbElement>(for elementType: T.Type) -> URL {
+    func fileUrl<T: StorableObject>(for elementType: T.Type) -> URL {
         return jsonDirectory.appendingPathComponent("\(key(for: elementType)).json")
     }
 
-    func prepareCache<T: CodableDbElement>(for elementType: T.Type) {
+    func prepareCache<T: StorableObject>(for elementType: T.Type) {
         let fileUrl = self.fileUrl(for: elementType)
         guard
             let jsonData = try? Data(contentsOf: fileUrl),
@@ -97,24 +96,33 @@ class JsonDatabase {
                 return
         }
         data[key(for: elementType)] = elements
-        print("Did load \(elements.count) elements from \(fileUrl.lastPathComponent).")
+
+        if debugLog {
+            print("Did load \(elements.count) elements from \(fileUrl.lastPathComponent).")
+        }
     }
 
-    func persistCache<T: CodableDbElement>(for elementType: T.Type) {
+    func persistCache<T: StorableObject>(for elementType: T.Type) {
         guard
             let elements = data[key(for: elementType)] as? [T],
             let encoded = try? encoder.encode(elements)
             else { return }
+
         let fileUrl = self.fileUrl(for: elementType)
         let filePath = fileUrl.relativePath
         fileManager.createFile(atPath: filePath, contents: encoded, attributes: nil)
-        print("Wrote \(elements.count) entries to \(fileUrl.lastPathComponent).")
+
+        if debugLog {
+            print("Wrote \(elements.count) entries to \(fileUrl.lastPathComponent).")
+        }
     }
 }
 
-extension JsonDatabase: Database {
+// MARK: - ObjectStore conformance.
 
-    func add<T: CodableDbElement>(_ object: T) {
+extension JsonObjectStore: ObjectStore {
+
+    func add<T: StorableObject>(_ object: T) {
         let key = self.key(for: T.self)
 
         if let index = data[key]?.firstIndex(where: { $0.id == object.id }) {
@@ -127,24 +135,24 @@ extension JsonDatabase: Database {
         shouldPersist(elementsOf: T.self)
     }
 
-    func remove<T: CodableDbElement>(_ object: T) {
+    func remove<T: StorableObject>(_ object: T) {
         data[key(for: T.self)]?.removeAll(where: { $0.id == object.id })
         shouldPersist(elementsOf: T.self)
     }
 
-    func all<T: CodableDbElement>() -> [T] {
+    func all<T: StorableObject>() -> [T] {
         return all(of: T.self)
     }
 
-    func all<T: CodableDbElement>(of elementType: T.Type) -> [T] {
+    func all<T: StorableObject>(of elementType: T.Type) -> [T] {
         return (data[key(for: elementType)] as? [T]) ?? []
     }
 
-    func element<T: CodableDbElement>(with id: Int) -> T? {
+    func element<T: StorableObject>(with id: Int) -> T? {
         return all(of: T.self).first(where: { $0.id == id })
     }
 
-    func removeAll<T: CodableDbElement>(of elementType: T.Type) {
+    func removeAll<T: StorableObject>(of elementType: T.Type) {
         data.removeValue(forKey: key(for: elementType))
         shouldPersist(elementsOf: elementType)
     }
