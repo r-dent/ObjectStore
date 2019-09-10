@@ -20,5 +20,6 @@ protocol Database {
     func remove<T: CodableDbElement>(_ object: T)
     func all<T: CodableDbElement>() -> [T]
     func all<T: CodableDbElement>(of elementType: T.Type) -> [T]
+    func element<T: CodableDbElement>(with id: Int) -> T?
     func removeAll<T: CodableDbElement>(of elementType: T.Type)
 }

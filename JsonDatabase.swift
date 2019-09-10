@@ -19,9 +19,9 @@ class JsonDatabase {
     private let fileManager = FileManager.default
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
-    private let throttleDelay: TimeInterval = 2
-    private var lastWriteOperation: Date = .distantPast
+    private let throttleDelay: Int = 2
     private var shouldPersist: [String: () -> ()] = [:]
+    private var writeTimer: DispatchSourceTimer!
 
     private lazy var jsonWriteQueue: DispatchQueue = {
         return DispatchQueue(label: "json_write_queue")
@@ -48,34 +48,24 @@ class JsonDatabase {
         for elementType in elementTypes {
             prepareCache(for: elementType)
         }
-
-        let t = DispatchSource.makeTimerSource()
-        t.schedule(deadline: .now(), repeating: throttleDelay)
-        t.setEventHandler() { [weak self] in
+        // Prepare timer.
+        writeTimer = DispatchSource.makeTimerSource()
+        writeTimer.schedule(deadline: .now(), repeating: .seconds(throttleDelay))
+        writeTimer.setEventHandler { [weak self] in
             self?.persistIfNeeded()
         }
-
-        // Start timer.
-//        jsonWriteQueue.async { [unowned self] in
-//            self.writeTimer = .scheduledTimer(
-//                timeInterval: self.throttleDelay,
-//                target: self,
-//                selector: #selector(self.persistIfNeeded),
-//                userInfo: nil,
-//                repeats: true
-//            )
-//            let runLoop = RunLoop.current
-//            runLoop.add(self.writeTimer, forMode: .default)
-//            runLoop.run()
-//        }
+        writeTimer.activate()
     }
 
     deinit {
-//        writeTimer.invalidate()
-//        writeTimer = nil
+        writeTimer.setEventHandler {}
+        writeTimer.cancel()
+        // If the timer is suspended, calling cancel without resuming triggers a crash.
+        // This is documented here https://forums.developer.apple.com/thread/15902
+        writeTimer.resume()
     }
 
-    @objc func persistIfNeeded() {
+    private func persistIfNeeded() {
         guard !shouldPersist.isEmpty
             else { return }
 
@@ -148,6 +138,10 @@ extension JsonDatabase: Database {
 
     func all<T: CodableDbElement>(of elementType: T.Type) -> [T] {
         return (data[key(for: elementType)] as? [T]) ?? []
+    }
+
+    func element<T: CodableDbElement>(with id: Int) -> T? {
+        return all(of: T.self).first(where: { $0.id == id })
     }
 
     func removeAll<T: CodableDbElement>(of elementType: T.Type) {
