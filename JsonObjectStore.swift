@@ -3,7 +3,27 @@
 //  RapScript
 //
 //  Created by Roman Gille on 09.09.19.
-//  Copyright © 2019 RapScript. All rights reserved.
+//
+//  Copyright (c) 2019 Roman Gille, http://romangille.com
+//
+//  Permission is hereby granted, free of charge, to any person obtaining
+//  a copy of this software and associated documentation files (the
+//  "Software"), to deal in the Software without restriction, including
+//  without limitation the rights to use, copy, modify, merge, publish,
+//  distribute, sublicense, and/or sell copies of the Software, and to
+//  permit persons to whom the Software is furnished to do so, subject to
+//  the following conditions:
+//
+//  The above copyright notice and this permission notice shall be
+//  included in all copies or substantial portions of the Software.
+//
+//  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+//  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+//  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+//  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+//  LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+//  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+//  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
 import Foundation
@@ -36,14 +56,21 @@ class JsonObjectStore {
         return jsonDataDir
     }()
 
-    init<T: StorableObject>(with elementTypes: [T.Type]) {
+    required init<T: StorableObject>(with elementTypes: [T.Type], completion: ((ObjectStore) -> ())?) {
         // Prepare caches.
-        for elementType in elementTypes {
-            prepareCache(for: elementType)
+        DispatchQueue.global().async { [weak self] in
+            for elementType in elementTypes {
+                self?.prepareCache(for: elementType)
+            }
+            DispatchQueue.main.async {
+                if let _self = self {
+                    completion?(_self)
+                }
+            }
         }
         // Prepare timer.
         writeTimer = DispatchSource.makeTimerSource()
-        writeTimer.schedule(deadline: .now(), repeating: .seconds(throttleDelay))
+        writeTimer.schedule(deadline: .now() + .seconds(throttleDelay), repeating: .seconds(throttleDelay))
         writeTimer.setEventHandler { [weak self] in
             self?.persistIfNeeded()
         }
@@ -98,7 +125,7 @@ class JsonObjectStore {
         data[key(for: elementType)] = elements
 
         if debugLog {
-            print("Did load \(elements.count) elements from \(fileUrl.lastPathComponent).")
+            print("JSON Store: Did load \(elements.count) elements from \(fileUrl.lastPathComponent).")
         }
     }
 
@@ -113,7 +140,7 @@ class JsonObjectStore {
         fileManager.createFile(atPath: filePath, contents: encoded, attributes: nil)
 
         if debugLog {
-            print("Wrote \(elements.count) entries to \(fileUrl.lastPathComponent).")
+            print("JSON Store: Wrote \(elements.count) entries to \(fileUrl.lastPathComponent).")
         }
     }
 }
