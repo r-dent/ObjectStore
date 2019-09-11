@@ -2,9 +2,11 @@
 
 A simple class that stores lists of `Codable` objects to JSON files. Providing an easy to use persistence solution for small amounts of data. 
 
+The ObjectStore will save the data to JSON files in the ApplicationSupport directory. These files will be named with the class name of the saved objects.
+
 ## Installation
 
-Just copy [ObjectStore.swift](ObjectStore.swift) and [JsonObjectStore.swift](JsonObjectStore.swift) to your project.
+Just copy the contents of the [Sources](Sources) folder to your project.
 
 ## Usage
 
