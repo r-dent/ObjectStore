@@ -28,22 +28,17 @@
 
 import Foundation
 
-protocol ObjectStoreElement {
-    var id: Int { get }
-}
-
 protocol ObjectStore {
 
-    typealias StorableObject = ObjectStoreElement & Codable
+    associatedtype Element: Hashable & Codable
 
     var debugLog: Bool { get set }
+    var elements: [Element] { get }
 
-    init<T: StorableObject>(with elementTypes: [T.Type], completion: ((ObjectStore) -> ())?)
-
-    func add<T: StorableObject>(_ object: T)
-    func remove<T: StorableObject>(_ object: T)
-    func all<T: StorableObject>() -> [T]
-    func all<T: StorableObject>(of elementType: T.Type) -> [T]
-    func element<T: StorableObject>(with id: Int) -> T?
-    func removeAll<T: StorableObject>(of elementType: T.Type)
+    func ready(handler: (([Element]) -> ())?)
+    
+    func set(_ elements: [Element])
+    func add(_ element: Element)
+    func remove(_ element: Element)
+    func clear()
 }
