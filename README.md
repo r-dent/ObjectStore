@@ -1,8 +1,8 @@
 #  Poor Persons Object Store
 
-A simple class that stores lists of `Codable` objects to JSON files. Providing an easy to use persistence solution for small amounts of data. 
+A simple class that stores a list of `Codable` objects to a JSON file. Providing an easy to use persistence solution for small amounts of data. 
 
-The ObjectStore will save the data to JSON files in the ApplicationSupport directory. These files will be named with the class name of the saved objects.
+The ObjectStore will save the data to JSON files in the ApplicationSupport directory.
 
 ## Installation
 
@@ -25,9 +25,8 @@ struct TestData: Codable, ObjectStoreElement {
 Create an ObjectStore for your types.
 
 ```swift
-let db = JsonObjectStore(with: [TestData.self]) { store in
-    let data: [TestData] = store.all()
-    print("Found \(data.count) objects.")
+db = JsonObjectStore<TestData>(fileName: "testdata.json") { elements in
+    print("Found \(elements.count) objects.")
 }
 ```
 
