@@ -30,21 +30,13 @@ import Foundation
 
 protocol ObjectStore {
 
-    typealias ElementsReadyBlock = (Set<Element>?) -> ()
-
     associatedtype Element: Hashable & Codable
 
-    var debugLog: Bool { get set }
     var elements: Set<Element> { get }
 
-    func onDataReady(_ handler: @escaping ElementsReadyBlock)
-
-    func set(_ elements: [Element])
-    func set(_ elements: Set<Element>)
-    func add(_ elements: [Element])
-    func add(_ element: Element)
+    func insert(_ element: Element)
+    func update(with element: Element)
     func remove(_ element: Element)
-    func clear()
 }
 
 @available(iOS, obsoleted: 13)
@@ -61,7 +53,7 @@ public protocol Identifiable {
 
 extension ObjectStore where Element: Identifiable {
 
-    func removeElement(wihth id: Element.ID) {
+    mutating func removeElement(with id: Element.ID) {
 
         if let element = element(with: id) {
             remove(element)

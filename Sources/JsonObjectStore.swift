@@ -30,66 +30,55 @@ import Foundation
 
 class JsonObjectStore<T: Codable & Hashable> {
 
-    private(set) var elements: Set<T> = [] {
-        didSet {
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else {
-                    return
-                }
-                self.shouldPersist = self.dataIsInitiallyLoaded && (oldValue != self.elements)
-            }
-        }
-    }
-    private let fileManager = FileManager.default
+    typealias ElementsReadyBlock = (Result<JsonObjectStore, Error>) -> ()
+
+    private(set) var elements: Set<T>
+    private let fileManager: FileManagerProtocol
+    private let ioQueue = DispatchQueue(label: UUID().uuidString)
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private let throttleDelay: Int = 2
+    private let fileUrl: URL
 
-    private(set) var dataIsInitiallyLoaded: Bool = false
     private var shouldPersist: Bool = false
     private var writeTimer: DispatchSourceTimer!
-    private var readyHandler: ElementsReadyBlock?
 
     let fileName: String
     var debugLog: Bool = false
 
-    private lazy var fileUrl: URL = {
-        let appSupportDir = try! FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: false
-        )
-        let jsonDataDir = appSupportDir.appendingPathComponent("jsonData")
 
-        if !FileManager.default.fileExists(atPath: jsonDataDir.relativePath) {
-            try? FileManager.default.createDirectory(at: jsonDataDir, withIntermediateDirectories: true, attributes: nil)
-        }
-
-        return jsonDataDir.appendingPathComponent(self.fileName)
-    }()
-
-    init(fileName: String = String(describing: T.self)) {
+    init(
+        fileName: String = String(describing: T.self) + ".json",
+        fileManager: FileManagerProtocol = FileManager.default,
+        enableLogging: Bool = false
+    ) throws {
 
         self.fileName = fileName
+        self.fileManager = fileManager
+        self.debugLog = enableLogging
+        self.fileUrl = try JsonObjectStore.prepareFileUrl(for: fileName, using: fileManager)
 
-        // Prepare caches.
-        DispatchQueue.global().async { [weak self] in
+        // Prepare cache.
+        if let jsonData = try? Data(contentsOf: fileUrl) {
 
-            try? self?.prepareCache()
+            let elements = try decoder.decode([T].self, from: jsonData)
+            self.elements = Set(elements)
+            log("Did load \(elements.count) elements from \(fileUrl.lastPathComponent).")
+        } else {
 
-            DispatchQueue.main.async {
-
-                self?.readyHandler?(self?.elements)
-                self?.dataIsInitiallyLoaded = true
-                self?.readyHandler = nil
-            }
+            self.elements = Set<T>()
+            log("Could not find file \(fileUrl.lastPathComponent). Starting with empty data.")
         }
+
         // Prepare timer.
-        writeTimer = DispatchSource.makeTimerSource()
+        writeTimer = DispatchSource.makeTimerSource(flags: [], queue: ioQueue)
         writeTimer.schedule(deadline: .now() + .seconds(throttleDelay), repeating: .seconds(throttleDelay))
         writeTimer.setEventHandler { [weak self] in
-            try? self?.persistIfNeeded()
+            
+            if self?.shouldPersist == true {
+                try? self?.persistCache()
+                self?.shouldPersist = false
+            }
         }
         writeTimer.activate()
     }
@@ -101,35 +90,53 @@ class JsonObjectStore<T: Codable & Hashable> {
         // This is documented here https://forums.developer.apple.com/thread/15902
         writeTimer.resume()
     }
+
+    static func create(
+        fileName: String = String(describing: T.self) + ".json",
+        fileManager: FileManagerProtocol = FileManager.default,
+        enableLogging: Bool = false,
+        completion: @escaping ElementsReadyBlock
+    ) {
+        DispatchQueue.global().async {
+            do {
+
+                let db = try JsonObjectStore(
+                    fileName: fileName,
+                    fileManager: fileManager,
+                    enableLogging: enableLogging
+                )
+                DispatchQueue.main.async {
+                    completion(.success(db))
+                }
+            } catch {
+
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Data persistence.
 
 private extension JsonObjectStore {
 
-    func persistIfNeeded() throws {
+    static func prepareFileUrl(for fileName: String, using fileManager: FileManagerProtocol) throws -> URL {
 
-        if shouldPersist {
-            try self.persistCache()
-        }
-        DispatchQueue.main.async { [weak self] in
-            self?.shouldPersist = false
-        }
-    }
+        let appSupportDir = try fileManager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        )
+        let jsonDataDir = appSupportDir.appendingPathComponent("jsonData")
 
-    /// Loads json file from disk an tries to parse it´s contents into the elements property.
-    func prepareCache() throws {
-
-        guard let jsonData = try? Data(contentsOf: fileUrl) else {
-
-            self.elements = Set<T>()
-            log("Could not find file \(fileUrl.lastPathComponent). Starting with empty data.")
-            return
+        if !fileManager.fileExists(atPath: jsonDataDir.relativePath) {
+            try fileManager.createDirectory(at: jsonDataDir, withIntermediateDirectories: true, attributes: nil)
         }
 
-        let elements = try decoder.decode([T].self, from: jsonData)
-        self.elements = Set(elements)
-        log("Did load \(elements.count) elements from \(fileUrl.lastPathComponent).")
+        return jsonDataDir.appendingPathComponent(fileName)
     }
 
     /// Writes the contents of the elements property do disk.
@@ -147,46 +154,48 @@ private extension JsonObjectStore {
     }
 
     func log(_ text: @autoclosure () -> String) {
+        
         if debugLog {
-            print("JSON Store: \(text())")
+            print("💾 \(fileName): \(text())")
         }
     }
 }
+
+// MARK: - ObjectStore cornformance
 
 extension JsonObjectStore: ObjectStore {
 
     typealias Element = T
 
-    func onDataReady(_ handler: @escaping ElementsReadyBlock) {
+    func insert(_ element: T) {
 
-        if dataIsInitiallyLoaded {
-            handler(elements)
-        } else {
-            self.readyHandler = handler
-        }
+        let elementsBefore = self.elements
+        self.elements.insert(element)
+        self.shouldPersist = (elementsBefore != elements)
     }
 
-    func set(_ elements: [T]) {
-        self.elements = Set(elements)
-    }
+    func update(with element: T) {
 
-    func set(_ elements: Set<T>) {
-        self.elements = elements
-    }
-
-    func add(_ elements: [T]) {
-        self.elements.formUnion(elements)
-    }
-
-    func add(_ element: T) {
-        elements.insert(element)
+        self.elements.update(with: element)
+        self.shouldPersist = true
     }
 
     func remove(_ element: T) {
-        elements.remove(element)
-    }
 
-    func clear() {
-        elements = Set<Element>()
+        let elementsBefore = self.elements
+        self.elements.remove(element)
+        self.shouldPersist = (elementsBefore != elements)
     }
 }
+
+// MARK: - FileManagerProtocol
+
+protocol FileManagerProtocol {
+
+    func fileExists(atPath path: String) -> Bool
+    func createFile(atPath path: String, contents data: Data?, attributes attr: [FileAttributeKey : Any]?) -> Bool
+    func createDirectory(at url: URL, withIntermediateDirectories createIntermediates: Bool, attributes: [FileAttributeKey : Any]?) throws
+    func url(for directory: FileManager.SearchPathDirectory, in domain: FileManager.SearchPathDomainMask, appropriateFor url: URL?, create shouldCreate: Bool) throws -> URL
+}
+
+extension FileManager: FileManagerProtocol {}
