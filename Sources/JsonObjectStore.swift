@@ -37,17 +37,11 @@ class JsonObjectStore<T: Codable & Hashable> {
     private let ioQueue = DispatchQueue(label: UUID().uuidString)
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
-    private let throttleDelay: Int = 2
+    private let throttleDelay: TimeInterval
     private let fileUrl: URL
     private var isThrottling: Bool = false
 
-    private var shouldPersist: Bool = false {
-        didSet {
-            if shouldPersist == true {
-                self.startThrottledWriting()
-            }
-        }
-    }
+    private var shouldPersist: Bool = false
     private var writeTimer: DispatchSourceTimer?
 
     let fileName: String
@@ -56,12 +50,14 @@ class JsonObjectStore<T: Codable & Hashable> {
 
     init(
         fileName: String = String(describing: T.self) + ".json",
+        throttleDelay: TimeInterval = 2,
         fileManager: FileManagerProtocol = FileManager.default,
         enableLogging: Bool = false
     ) throws {
 
         self.fileName = fileName
         self.fileManager = fileManager
+        self.throttleDelay = throttleDelay
         self.debugLog = enableLogging
         self.fileUrl = try JsonObjectStore.prepareFileUrl(for: fileName, using: fileManager)
 
@@ -85,6 +81,7 @@ class JsonObjectStore<T: Codable & Hashable> {
     static func create(
         fileName: String = String(describing: T.self) + ".json",
         fileManager: FileManagerProtocol = FileManager.default,
+        throttleDelay: TimeInterval = 2,
         enableLogging: Bool = false,
         completion: @escaping ElementsReadyBlock
     ) {
@@ -93,6 +90,7 @@ class JsonObjectStore<T: Codable & Hashable> {
 
                 let db = try JsonObjectStore(
                     fileName: fileName,
+                    throttleDelay: throttleDelay,
                     fileManager: fileManager,
                     enableLogging: enableLogging
                 )
@@ -130,38 +128,50 @@ private extension JsonObjectStore {
         return jsonDataDir.appendingPathComponent(fileName)
     }
 
-    /// Writes the contents of the elements property do disk.
-    func persistCache() throws {
+    func newDataAvailable() {
 
-        let encoded = try encoder.encode(self.elements)
+        shouldPersist = true
+        if !isThrottling {
+            startThrottledWriting()
+        }
+    }
+
+    /// Writes the contents of the elements property do disk.
+    func persistCache() {
+
+        var encoded: Data?
+        do {
+            encoded = try encoder.encode(self.elements)
+        } catch {
+            shouldPersist = true
+            log("♦️Error: \(error)")
+            return
+        }
+
         let filePath = fileUrl.relativePath
         let wrote = fileManager.createFile(atPath: filePath, contents: encoded, attributes: nil)
 
         if wrote {
             log("Wrote \(elements.count) entries to \(fileUrl.lastPathComponent).")
         } else {
-            log("Error writing file!")
+            shouldPersist = true
+            log("♦️Error writing file!")
         }
     }
 
     func startThrottledWriting() {
 
-        guard !isThrottling else {
-            return
-        }
         isThrottling = true
+        log("Start throttle")
 
-        ioQueue.async { [weak self] in
-            try? self?.persistCache()
-        }
-
+        let delay = Int(round(throttleDelay))
         writeTimer = DispatchSource.makeTimerSource(flags: [], queue: ioQueue)
-        writeTimer?.schedule(deadline: .now() + .seconds(throttleDelay), repeating: .seconds(throttleDelay))
+        writeTimer?.schedule(deadline: .now() + .milliseconds(.random(in: 50...100)), repeating: .seconds(delay))
         writeTimer?.setEventHandler { [weak self] in
 
             if self?.shouldPersist == true {
-                try? self?.persistCache()
                 self?.shouldPersist = false
+                self?.persistCache()
             } else {
                 self?.stopWriteTimer()
             }
@@ -176,6 +186,7 @@ private extension JsonObjectStore {
         writeTimer = nil
 
         isThrottling = false
+        log("Stop throttle")
     }
 
     func log(_ text: @autoclosure () -> String) {
@@ -196,20 +207,20 @@ extension JsonObjectStore: ObjectStore {
 
         let elementsBefore = self.elements
         self.elements.insert(element)
-        self.shouldPersist = (elementsBefore != elements)
+        if elementsBefore != elements { newDataAvailable() }
     }
 
     func update(with element: T) {
 
         self.elements.update(with: element)
-        self.shouldPersist = true
+        newDataAvailable()
     }
 
     func remove(_ element: T) {
 
         let elementsBefore = self.elements
         self.elements.remove(element)
-        self.shouldPersist = (elementsBefore != elements)
+        if elementsBefore != elements { newDataAvailable() }
     }
 }
 
