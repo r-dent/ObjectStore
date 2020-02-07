@@ -39,14 +39,13 @@ class JsonObjectStore<T: Codable & Hashable> {
     private let decoder = JSONDecoder()
     private let throttleDelay: TimeInterval
     private let fileUrl: URL
-    private var isThrottling: Bool = false
+    private let fileName: String
 
+    private var isThrottling: Bool = false
     private var shouldPersist: Bool = false
     private var writeTimer: DispatchSourceTimer?
 
-    let fileName: String
     var debugLog: Bool = false
-
 
     init(
         fileName: String = String(describing: T.self) + ".json",
