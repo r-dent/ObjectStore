@@ -39,9 +39,16 @@ class JsonObjectStore<T: Codable & Hashable> {
     private let decoder = JSONDecoder()
     private let throttleDelay: Int = 2
     private let fileUrl: URL
+    private var isThrottling: Bool = false
 
-    private var shouldPersist: Bool = false
-    private var writeTimer: DispatchSourceTimer!
+    private var shouldPersist: Bool = false {
+        didSet {
+            if shouldPersist == true {
+                self.startThrottledWriting()
+            }
+        }
+    }
+    private var writeTimer: DispatchSourceTimer?
 
     let fileName: String
     var debugLog: Bool = false
@@ -69,26 +76,10 @@ class JsonObjectStore<T: Codable & Hashable> {
             self.elements = Set<T>()
             log("Could not find file \(fileUrl.lastPathComponent). Starting with empty data.")
         }
-
-        // Prepare timer.
-        writeTimer = DispatchSource.makeTimerSource(flags: [], queue: ioQueue)
-        writeTimer.schedule(deadline: .now() + .seconds(throttleDelay), repeating: .seconds(throttleDelay))
-        writeTimer.setEventHandler { [weak self] in
-            
-            if self?.shouldPersist == true {
-                try? self?.persistCache()
-                self?.shouldPersist = false
-            }
-        }
-        writeTimer.activate()
     }
 
     deinit {
-        writeTimer.setEventHandler {}
-        writeTimer.cancel()
-        // If the timer is suspended, calling cancel without resuming triggers a crash.
-        // This is documented here https://forums.developer.apple.com/thread/15902
-        writeTimer.resume()
+        stopWriteTimer()
     }
 
     static func create(
@@ -151,6 +142,40 @@ private extension JsonObjectStore {
         } else {
             log("Error writing file!")
         }
+    }
+
+    func startThrottledWriting() {
+
+        guard !isThrottling else {
+            return
+        }
+        isThrottling = true
+
+        ioQueue.async { [weak self] in
+            try? self?.persistCache()
+        }
+
+        writeTimer = DispatchSource.makeTimerSource(flags: [], queue: ioQueue)
+        writeTimer?.schedule(deadline: .now() + .seconds(throttleDelay), repeating: .seconds(throttleDelay))
+        writeTimer?.setEventHandler { [weak self] in
+
+            if self?.shouldPersist == true {
+                try? self?.persistCache()
+                self?.shouldPersist = false
+            } else {
+                self?.stopWriteTimer()
+            }
+        }
+        writeTimer?.activate()
+    }
+
+    func stopWriteTimer() {
+
+        writeTimer?.setEventHandler {}
+        writeTimer?.cancel()
+        writeTimer = nil
+
+        isThrottling = false
     }
 
     func log(_ text: @autoclosure () -> String) {
