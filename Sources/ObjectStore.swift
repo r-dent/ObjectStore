@@ -39,6 +39,8 @@ protocol ObjectStore {
     func remove(_ element: Element)
 }
 
+// MARK: - Protocol backport.
+
 @available(iOS, obsoleted: 13)
 public protocol Identifiable {
 
@@ -62,5 +64,42 @@ extension ObjectStore where Element: Identifiable {
 
     func element(with id: Element.ID) -> Element? {
         return elements.first(where: { $0.id == id })
+    }
+}
+
+// MARK: - Type erasing type.
+
+class AnyObjectStore<Element: Hashable & Codable> {
+
+    private let getElements: () -> Set<Element>
+    private let insertElement: (Element) -> Void
+    private let updateElement: (Element) -> Void
+    private let removeElement: (Element) -> Void
+
+    init<Store: ObjectStore>(_ objectStore: Store) where Store.Element == Element {
+
+        getElements = { return objectStore.elements }
+        insertElement = objectStore.insert
+        updateElement = objectStore.update
+        removeElement = objectStore.remove
+    }
+}
+
+extension AnyObjectStore: ObjectStore {
+
+    var elements: Set<Element> {
+        getElements()
+    }
+
+    func insert(_ element: Element) {
+        insertElement(element)
+    }
+
+    func update(with element: Element) {
+        updateElement(element)
+    }
+
+    func remove(_ element: Element) {
+        removeElement(element)
     }
 }
