@@ -221,6 +221,27 @@ extension JsonObjectStore: ObjectStore {
         self.elements.remove(element)
         if elementsBefore != elements { newDataAvailable() }
     }
+
+    func set(_ elements: Set<T>) {
+
+        let shouldWrite = self.elements != elements
+        self.elements = elements
+        if shouldWrite { newDataAvailable() }
+    }
+
+    func remove(_ elements: Set<T>) {
+
+        let elementsBefore = self.elements
+        self.elements.subtract(elements)
+        if elementsBefore != elements { newDataAvailable() }
+    }
+
+    func insert(_ elements: Set<T>) {
+
+        let elementsBefore = self.elements
+        self.elements.formUnion(elements)
+        if elementsBefore != elements { newDataAvailable() }
+    }
 }
 
 // MARK: - FileManagerProtocol

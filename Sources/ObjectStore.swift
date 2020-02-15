@@ -37,6 +37,10 @@ protocol ObjectStore {
     func insert(_ element: Element)
     func update(with element: Element)
     func remove(_ element: Element)
+
+    func insert(_ elements: Set<Element>)
+    func remove(_ elements: Set<Element>)
+    func set(_ elements: Set<Element>)
 }
 
 // MARK: - Protocol backport.
@@ -67,6 +71,21 @@ extension ObjectStore where Element: Identifiable {
     }
 }
 
+extension ObjectStore {
+
+    func insert(_ elements: [Element]) {
+        insert(Set(elements))
+    }
+
+    func remove(_ elements: [Element]) {
+        remove(Set(elements))
+    }
+
+    func set(_ elements: [Element]) {
+        set(Set(elements))
+    }
+}
+
 // MARK: - Type erasing type.
 
 class AnyObjectStore<Element: Hashable & Codable> {
@@ -76,12 +95,21 @@ class AnyObjectStore<Element: Hashable & Codable> {
     private let updateElement: (Element) -> Void
     private let removeElement: (Element) -> Void
 
+    private let insertElements: (Set<Element>) -> Void
+    private let removeElements: (Set<Element>) -> Void
+    private let setElements: (Set<Element>) -> Void
+
     init<Store: ObjectStore>(_ objectStore: Store) where Store.Element == Element {
 
         getElements = { return objectStore.elements }
+
         insertElement = objectStore.insert
         updateElement = objectStore.update
         removeElement = objectStore.remove
+
+        insertElements = objectStore.insert
+        removeElements = objectStore.remove
+        setElements = objectStore.set
     }
 }
 
@@ -101,5 +129,17 @@ extension AnyObjectStore: ObjectStore {
 
     func remove(_ element: Element) {
         removeElement(element)
+    }
+
+    func insert(_ elements: Set<Element>) {
+        insertElements(elements)
+    }
+
+    func remove(_ elements: Set<Element>) {
+        removeElements(elements)
+    }
+
+    func set(_ elements: Set<Element>) {
+        setElements(elements)
     }
 }
